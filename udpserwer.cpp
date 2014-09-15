@@ -1,29 +1,21 @@
 #include "udpserwer.h"
-
-#define LISTEN_PORT 3030
-#define COM_PORT 3031
-#define CLIENT_PORT 3032
-#define LOCAL_ADDRESS "192.168.1.2"
-
+/*
 UDPSerwer::UDPSerwer()
 {
 
 }
+*/
 
-UDPSerwer::UDPSerwer(QString arg)
+UDPSerwer::UDPSerwer(uint ListenPort, uint ComPort, uint ClientPort)
+    :listenPort(ListenPort),comPort(ComPort),clientPort(ClientPort)
 {
     outListenSocket = new QUdpSocket(this);
     outClientSocket = new QUdpSocket(this);
     activeClientFlag = false;
 
-    if(arg == "default")
-    {
-        localAddress.setAddress(LOCAL_ADDRESS); // ZROB: wykryj adres w lokalnej sieci
-        listenPort = LISTEN_PORT;
-        comPort = COM_PORT;
-        clientPort = CLIENT_PORT;
-        qDebug() << "sluchaj na:" << localAddress.toString()<< ":"<< listenPort << endl;
-    }
+    localAddress = whatsMyIP();
+
+    waitForClient();
 }
 
 UDPSerwer::~UDPSerwer()
@@ -39,18 +31,35 @@ UDPSerwer::~UDPSerwer()
         outClientSocket = NULL;
     }
 }
+    // zwraca prawdopodobny 'lokalny' adres IP
+QHostAddress UDPSerwer::whatsMyIP()
+{
+    QNetworkInterface network;
 
+    for(int i=0; i<network.allAddresses().count(); i++)
+    {
+        if(network.allAddresses().at(i).protocol() == QAbstractSocket::IPv4Protocol)
+        {
+            if(network.allAddresses().at(i).toString().contains("192.168."))
+                return network.allAddresses().at(i);
+        }
+    }
+    return QHostAddress::Null;
+}
+    // nasluchuje potencjalnych klientow
 void UDPSerwer::waitForClient()
 {
     inListenSocket = new QUdpSocket(this);
-    inListenSocket->bind(listenPort);
+    inListenSocket->bind(localAddress,listenPort);
     QObject::connect(inListenSocket,SIGNAL(readyRead()),this,SLOT(proceesSender()));
+    qDebug() << "Nasluchuje klientow:" << localAddress.toString()<< ":"<< listenPort;
 }
-
+    // slucha zaakceptowanego klienta
 void UDPSerwer::listenClient()
 {
     inClientSocket->bind(comPort);
     QObject::connect(inClientSocket,SIGNAL(readyRead()),this,SLOT(proceesClient()));
+    qDebug() << "Nasluchuje zaakceptowanego klienta:" << localAddress.toString()<< ":"<< comPort;
 }
 
 void UDPSerwer::setClient(QHostAddress address)
@@ -58,6 +67,7 @@ void UDPSerwer::setClient(QHostAddress address)
     inClientSocket = new QUdpSocket(this);
     clientAddress = address;
     activeClientFlag = true;
+    qDebug() << "Klient zapisany";
 }
 
 void UDPSerwer::removeClient()
@@ -76,26 +86,30 @@ void UDPSerwer::removeClient()
     clientAddress = NULL;
     clientPort = NULL;
     activeClientFlag = false;
+    qDebug() << "Klient usuniety";
 }
 
 void UDPSerwer::writeData(QUdpSocket *socket, QByteArray datagram)
 {
     socket->bind(clientAddress,clientPort);
     socket->writeDatagram(datagram.data(),datagram.size(),clientAddress,clientPort);
+    qDebug() << "WYSLANO:" << datagram;
 }
 
 void UDPSerwer::writeData(QUdpSocket *socket, QByteArray *datagram)
 {
     socket->bind(clientAddress,clientPort);
     socket->writeDatagram(datagram->data(),datagram->size(),clientAddress,clientPort);
+    qDebug() << "WYSLANO:" << datagram;
 }
 
 void UDPSerwer::writeData(QUdpSocket *socket, char string[])
 {
-    QByteArray datagram;
-    datagram.append(string);
+    QByteArray datagram = string;
     socket->bind(clientAddress,clientPort);
     socket->writeDatagram(datagram.data(),datagram.size(),clientAddress,clientPort);
+    socket->waitForBytesWritten();
+    qDebug() << "WYSLANO:" << datagram;
 }
 
 QByteArray UDPSerwer::readData(QUdpSocket *socket)
@@ -105,6 +119,7 @@ QByteArray UDPSerwer::readData(QUdpSocket *socket)
     {
             datagram.resize(socket->pendingDatagramSize());
             socket->readDatagram(datagram.data(),datagram.size(),&senderAddress); //,&senderAddress -> zapisuje IP sendera
+            qDebug() <<"ODEBRANO:"<< datagram;
     }
     return datagram;
 }
@@ -115,15 +130,17 @@ void UDPSerwer::proceesSender()
 {
     QByteArray inListenData;
     inListenData = readData(inListenSocket);
-    if(inListenData.data() == "Q")
+    if(inListenData == "query")
     {
         if(activeClientFlag)    // inne aktywne polaczenie
         {
             writeData(outListenSocket,"N"); // 'N' - odrzucona prosba
+            qDebug() << "Prosba odrzucona";
         }
         else
         {
             writeData(outListenSocket,"Y"); // 'Y' - przyjeta prosba
+            qDebug() << "Prosba przyjeta";
             setClient(senderAddress);
             listenClient();
         }
@@ -135,9 +152,9 @@ void UDPSerwer::proceesClient()
     QByteArray inClientData;
     inClientData = readData(inClientSocket);
     // USTAL ARGUMENTY DO ODBIORU; CASE?
-    if(inClientData.data() == "logout")
+    if(inClientData == "logout")
     {
-        writeData(outClientSocket,"Disconnected");
+        writeData(outClientSocket,"disconnected");
         removeClient();
     }
 }
