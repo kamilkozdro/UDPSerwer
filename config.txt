@@ -1,0 +1,8 @@
+#Port na ktorym nasluchuje serwer
+3030
+#Port na ktorym wystepuje komunikacja serwer - zaakceptowany klient
+3031
+#Port na ktorym nasluchuje klient
+3032
+#Adres serwera
+192.168.1.2

@@ -1,34 +1,26 @@
 #include "udpserwer.h"
-/*
+
 UDPSerwer::UDPSerwer()
 {
-
+    activeClientFlag = false;
+    loadConfig();
+    //waitForClient();
 }
-*/
 
-UDPSerwer::UDPSerwer(uint ListenPort, uint ComPort, uint ClientPort)
+UDPSerwer::UDPSerwer(quint16 ListenPort, quint16 ComPort, quint16 ClientPort)
     :listenPort(ListenPort),comPort(ComPort),clientPort(ClientPort)
 {
-    outListenSocket = new QUdpSocket(this);
-    outClientSocket = new QUdpSocket(this);
     activeClientFlag = false;
-
     localAddress = whatsMyIP();
-
-    waitForClient();
+    //waitForClient();
 }
 
 UDPSerwer::~UDPSerwer()
 {
-    if(outListenSocket != NULL) // czy potrzebne?
+    if(clientSocket != NULL) // czy potrzebne?
     {
-        delete outListenSocket;
-        outListenSocket = NULL;
-    }
-    if(outClientSocket != NULL) // czy potrzebne?
-    {
-        delete outClientSocket;
-        outClientSocket = NULL;
+        delete clientSocket;
+        clientSocket = NULL;
     }
 }
     // zwraca prawdopodobny 'lokalny' adres IP
@@ -40,31 +32,83 @@ QHostAddress UDPSerwer::whatsMyIP()
     {
         if(network.allAddresses().at(i).protocol() == QAbstractSocket::IPv4Protocol)
         {
-            if(network.allAddresses().at(i).toString().contains("192.168."))
+            if(network.allAddresses().at(i).toString().contains("192.168.1"))
                 return network.allAddresses().at(i);
         }
     }
     return QHostAddress::Null;
 }
+
+void UDPSerwer::run()
+{
+    waitForClient();
+}
+
+void UDPSerwer::loadConfig()
+{
+    /* ZAPIS KONFIGURACJI
+        #Port na ktorym nasluchuje serwer
+        3030
+        #Port na ktorym wystepuje komunikacja serwer - zaakceptowany klient
+        3031
+        #Port na ktorym nasluchuje klient
+        3032
+        #Adres serwera
+        192.168.1.2
+    */
+    QFile confFile("A:/config.txt");
+
+    if(!confFile.open(QIODevice::ReadOnly | QIODevice::Text))  qDebug() << "Fail to read config file";
+    else
+    {
+        QByteArray buffer;
+
+        buffer = confFile.readLine();
+        buffer = confFile.readLine();
+        buffer.chop(1);
+        listenPort = buffer.toUShort(0,16);
+        //qDebug() << hex << listenPort;
+        buffer = confFile.readLine();
+        buffer = confFile.readLine();
+        buffer.chop(1);
+        comPort = buffer.toUShort(0,16);
+        //qDebug() << hex << comPort;
+        buffer = confFile.readLine();
+        buffer = confFile.readLine();
+        buffer.chop(1);
+        clientPort = buffer.toUShort(0,16);
+        //qDebug() << hex << clientPort;
+        buffer = confFile.readLine();
+        buffer = confFile.readLine();
+        buffer.chop(1);
+        if( buffer == "0")  localAddress = whatsMyIP();
+        else    localAddress.setAddress(QString(buffer));
+        //qDebug() << buffer;
+        confFile.close();
+    }
+}
+
     // nasluchuje potencjalnych klientow
 void UDPSerwer::waitForClient()
 {
-    inListenSocket = new QUdpSocket(this);
-    inListenSocket->bind(localAddress,listenPort);
-    QObject::connect(inListenSocket,SIGNAL(readyRead()),this,SLOT(proceesSender()));
-    qDebug() << "Nasluchuje klientow:" << localAddress.toString()<< ":"<< listenPort;
+    listenSocket = new QUdpSocket(this);
+    listenSocket->bind(localAddress, listenPort);
+    connect(listenSocket,SIGNAL(readyRead()),this,SLOT(proceesSender()));
+    qDebug() << "Nasluchuje klientow:" << localAddress<< ":"<< hex << listenPort;
+    qDebug() << listenSocket->state();
 }
     // slucha zaakceptowanego klienta
 void UDPSerwer::listenClient()
 {
-    inClientSocket->bind(comPort);
-    QObject::connect(inClientSocket,SIGNAL(readyRead()),this,SLOT(proceesClient()));
-    qDebug() << "Nasluchuje zaakceptowanego klienta:" << localAddress.toString()<< ":"<< comPort;
+    clientSocket->bind(localAddress, comPort);
+    QObject::connect(clientSocket,SIGNAL(readyRead()),this,SLOT(proceesClient()));
+    qDebug() << "Nasluchuje zaakceptowanego klienta:" << clientAddress<< ":"<< hex << comPort;
+    qDebug() << listenSocket->state() << clientSocket->state();
 }
 
 void UDPSerwer::setClient(QHostAddress address)
 {
-    inClientSocket = new QUdpSocket(this);
+    clientSocket = new QUdpSocket(this);
     clientAddress = address;
     activeClientFlag = true;
     qDebug() << "Klient zapisany";
@@ -72,53 +116,121 @@ void UDPSerwer::setClient(QHostAddress address)
 
 void UDPSerwer::removeClient()
 {
-    inClientSocket->close();
-    if(inClientSocket != NULL)
+    clientSocket->close();
+    if(clientSocket != NULL)
     {
-        delete inClientSocket;
-        inClientSocket = NULL;
-    }
-    if(outClientSocket != NULL)
-    {
-        delete outClientSocket;
-        outClientSocket = NULL;
+        delete clientSocket;
+        clientSocket = NULL;
     }
     clientAddress = NULL;
-    clientPort = NULL;
     activeClientFlag = false;
     qDebug() << "Klient usuniety";
 }
-
+/*
 void UDPSerwer::writeData(QUdpSocket *socket, QByteArray datagram)
 {
-    socket->bind(clientAddress,clientPort);
     socket->writeDatagram(datagram.data(),datagram.size(),clientAddress,clientPort);
+    socket->waitForBytesWritten();
     qDebug() << "WYSLANO:" << datagram;
 }
 
 void UDPSerwer::writeData(QUdpSocket *socket, QByteArray *datagram)
 {
-    socket->bind(clientAddress,clientPort);
     socket->writeDatagram(datagram->data(),datagram->size(),clientAddress,clientPort);
+    socket->waitForBytesWritten();
     qDebug() << "WYSLANO:" << datagram;
 }
 
 void UDPSerwer::writeData(QUdpSocket *socket, char string[])
 {
     QByteArray datagram = string;
-    socket->bind(clientAddress,clientPort);
     socket->writeDatagram(datagram.data(),datagram.size(),clientAddress,clientPort);
     socket->waitForBytesWritten();
     qDebug() << "WYSLANO:" << datagram;
 }
+*/
+void UDPSerwer::writeToSender(char string[])
+{
+    QByteArray datagram = string;
+    listenSocket->writeDatagram(datagram.data(),datagram.size(),senderAddress,clientPort);
+    listenSocket->waitForBytesWritten();
+    qDebug() << "WYSLANO:" << datagram;
+}
 
-QByteArray UDPSerwer::readData(QUdpSocket *socket)
+void UDPSerwer::writeToClient(char string[])
+{
+    QByteArray datagram = string;
+    clientSocket->writeDatagram(datagram.data(),datagram.size(),clientAddress,comPort);
+    clientSocket->waitForBytesWritten();
+    qDebug() << "WYSLANO:" << datagram;
+}
+
+void UDPSerwer::writeToClient(QByteArray datagram)
+{
+    clientSocket->writeDatagram(datagram.data(),datagram.size(),clientAddress,comPort);
+    clientSocket->waitForBytesWritten();
+    qDebug() << "WYSLANO:" << datagram;
+}
+
+void UDPSerwer::sendImage()
+{/*
+    QFile img("test.png");
+    QBuffer buffer;
+
+    QDataStream out(&buffer);
+    out << qint32(0);              // placeholder for info about bytes for the binary data
+    out << img.readAll();                 // binary representation of image (as PNG file)
+
+    out.device()->seek(0); // go back to start
+    out << buffer.size();    // info about bytes for the size value (int) and binary image data (image)
+
+    if (clientSocket->write(buffer) < buffer.size()) {
+       qWarning("transmit error!");
+    }*/
+}
+
+void UDPSerwer::broadcast(quint16 port, char string[])
+{
+    QByteArray datagram = string;
+    QUdpSocket tempSocket;
+    tempSocket.writeDatagram(datagram.data(),datagram.size(),QHostAddress::Broadcast,port);
+    tempSocket.waitForBytesWritten();
+    qDebug() << "WYSLANO:" << datagram;
+}
+// 1 - udane, 0 - blad
+int UDPSerwer::grabFrame()
+{
+    QProcess process;
+    if( process.execute("grabFrame.exe") != 0 )
+    {
+        qDebug() << "cant execute grabFrame.exe";
+        return 0;
+    }
+    else
+    {
+        return 1;
+    }
+}
+
+QByteArray UDPSerwer::readData()
 {
     QByteArray datagram;
-    while (socket->hasPendingDatagrams())
+    while (listenSocket->hasPendingDatagrams())
     {
-            datagram.resize(socket->pendingDatagramSize());
-            socket->readDatagram(datagram.data(),datagram.size(),&senderAddress); //,&senderAddress -> zapisuje IP sendera
+            datagram.resize(listenSocket->pendingDatagramSize());
+            listenSocket->readDatagram(datagram.data(),datagram.size(),&senderAddress);
+            qDebug() <<"ODEBRANO:"<< datagram << "od:" << senderAddress;
+    }
+    return datagram;
+}
+
+QByteArray UDPSerwer::readClient()
+{
+    QByteArray datagram;
+    while (clientSocket->hasPendingDatagrams())
+    {
+            datagram.resize(datagram.size()+clientSocket->pendingDatagramSize());
+            clientSocket->readDatagram(datagram.data(),datagram.size());
             qDebug() <<"ODEBRANO:"<< datagram;
     }
     return datagram;
@@ -129,17 +241,17 @@ QByteArray UDPSerwer::readData(QUdpSocket *socket)
 void UDPSerwer::proceesSender()
 {
     QByteArray inListenData;
-    inListenData = readData(inListenSocket);
+    inListenData = readData();
     if(inListenData == "query")
     {
         if(activeClientFlag)    // inne aktywne polaczenie
         {
-            writeData(outListenSocket,"N"); // 'N' - odrzucona prosba
+            writeToSender("N"); // 'N' - odrzucona prosba
             qDebug() << "Prosba odrzucona";
         }
         else
         {
-            writeData(outListenSocket,"Y"); // 'Y' - przyjeta prosba
+            writeToSender("Y"); // 'Y' - przyjeta prosba
             qDebug() << "Prosba przyjeta";
             setClient(senderAddress);
             listenClient();
@@ -150,11 +262,27 @@ void UDPSerwer::proceesSender()
 void UDPSerwer::proceesClient()
 {
     QByteArray inClientData;
-    inClientData = readData(inClientSocket);
-    // USTAL ARGUMENTY DO ODBIORU; CASE?
+    inClientData = readClient();
+    // USTAL ARGUMENTY DO ODBIORU;  CASE?
+
     if(inClientData == "logout")
     {
-        writeData(outClientSocket,"disconnected");
+        writeToClient("disconnected");
         removeClient();
+    }
+    else if(inClientData == "grabFrame")
+    {
+        if(grabFrame() != 1)    writeToClient("grabFrame failed");
+        else
+        {
+            QFile img("test.pgm");
+            if (!img.open(QIODevice::ReadOnly | QIODevice::Text))
+                     qDebug() << "nie otworzono img";
+            else
+            {
+                writeToClient("frame grabbed");
+                writeToClient(QByteArray(img.readAll()));
+            }
+        }
     }
 }
