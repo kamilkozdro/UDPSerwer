@@ -23,7 +23,7 @@ UDPSerwer::~UDPSerwer()
         clientSocket = NULL;
     }
 }
-    // zwraca prawdopodobny 'lokalny' adres IP
+// zwraca prawdopodobny 'lokalny' adres IP
 QHostAddress UDPSerwer::whatsMyIP()
 {
     QNetworkInterface network;
@@ -48,11 +48,11 @@ void UDPSerwer::loadConfig()
 {
     /* ZAPIS KONFIGURACJI
         #Port na ktorym nasluchuje serwer
-        3030
+        3030 0xBD6
         #Port na ktorym wystepuje komunikacja serwer - zaakceptowany klient
-        3031
+        3030 0xBD7
         #Port na ktorym nasluchuje klient
-        3032
+        3030 0xBD8
         #Adres serwera
         192.168.1.2
     */
@@ -66,17 +66,17 @@ void UDPSerwer::loadConfig()
         buffer = confFile.readLine();
         buffer = confFile.readLine();
         buffer.chop(1);
-        listenPort = buffer.toUShort(0,16);
+        listenPort = buffer.toUInt();
         //qDebug() << hex << listenPort;
         buffer = confFile.readLine();
         buffer = confFile.readLine();
         buffer.chop(1);
-        comPort = buffer.toUShort(0,16);
+        comPort = buffer.toUInt();
         //qDebug() << hex << comPort;
         buffer = confFile.readLine();
         buffer = confFile.readLine();
         buffer.chop(1);
-        clientPort = buffer.toUShort(0,16);
+        clientPort = buffer.toUInt();
         //qDebug() << hex << clientPort;
         buffer = confFile.readLine();
         buffer = confFile.readLine();
@@ -88,7 +88,7 @@ void UDPSerwer::loadConfig()
     }
 }
 
-    // nasluchuje potencjalnych klientow
+// nasluchuje potencjalnych klientow
 void UDPSerwer::waitForClient()
 {
     listenSocket = new QUdpSocket(this);
@@ -97,7 +97,7 @@ void UDPSerwer::waitForClient()
     qDebug() << "Nasluchuje klientow:" << localAddress<< ":"<< hex << listenPort;
     qDebug() << listenSocket->state();
 }
-    // slucha zaakceptowanego klienta
+// slucha zaakceptowanego klienta
 void UDPSerwer::listenClient()
 {
     clientSocket->bind(localAddress, comPort);
@@ -154,7 +154,7 @@ void UDPSerwer::writeToSender(char string[])
     QByteArray datagram = string;
     listenSocket->writeDatagram(datagram.data(),datagram.size(),senderAddress,clientPort);
     listenSocket->waitForBytesWritten();
-    qDebug() << "WYSLANO:" << datagram;
+    //qDebug() << "WYSLANO:" << datagram;
 }
 
 void UDPSerwer::writeToClient(char string[])
@@ -162,31 +162,23 @@ void UDPSerwer::writeToClient(char string[])
     QByteArray datagram = string;
     clientSocket->writeDatagram(datagram.data(),datagram.size(),clientAddress,comPort);
     clientSocket->waitForBytesWritten();
-    qDebug() << "WYSLANO:" << datagram;
+    //qDebug() << "WYSLANO:" << datagram;
 }
 
 void UDPSerwer::writeToClient(QByteArray datagram)
 {
     clientSocket->writeDatagram(datagram.data(),datagram.size(),clientAddress,comPort);
     clientSocket->waitForBytesWritten();
-    qDebug() << "WYSLANO:" << datagram;
+    //qDebug() << "WYSLANO:" << datagram;
 }
 
 void UDPSerwer::sendImage()
-{/*
-    QFile img("test.png");
-    QBuffer buffer;
-
-    QDataStream out(&buffer);
-    out << qint32(0);              // placeholder for info about bytes for the binary data
-    out << img.readAll();                 // binary representation of image (as PNG file)
-
-    out.device()->seek(0); // go back to start
-    out << buffer.size();    // info about bytes for the size value (int) and binary image data (image)
-
-    if (clientSocket->write(buffer) < buffer.size()) {
-       qWarning("transmit error!");
-    }*/
+{
+    QFile img("test.pgm");
+    if (!img.open(QIODevice::ReadOnly | QIODevice::Text))
+        qDebug() << "nie otworzono img";
+    else
+        writeToClient(QByteArray(img.readAll()));
 }
 
 void UDPSerwer::broadcast(quint16 port, char string[])
@@ -217,9 +209,9 @@ QByteArray UDPSerwer::readData()
     QByteArray datagram;
     while (listenSocket->hasPendingDatagrams())
     {
-            datagram.resize(listenSocket->pendingDatagramSize());
-            listenSocket->readDatagram(datagram.data(),datagram.size(),&senderAddress);
-            qDebug() <<"ODEBRANO:"<< datagram << "od:" << senderAddress;
+        datagram.resize(listenSocket->pendingDatagramSize());
+        listenSocket->readDatagram(datagram.data(),datagram.size(),&senderAddress);
+        qDebug() <<"ODEBRANO:"<< datagram << "od:" << senderAddress;
     }
     return datagram;
 }
@@ -229,9 +221,9 @@ QByteArray UDPSerwer::readClient()
     QByteArray datagram;
     while (clientSocket->hasPendingDatagrams())
     {
-            datagram.resize(datagram.size()+clientSocket->pendingDatagramSize());
-            clientSocket->readDatagram(datagram.data(),datagram.size());
-            qDebug() <<"ODEBRANO:"<< datagram;
+        datagram.resize(datagram.size()+clientSocket->pendingDatagramSize());
+        clientSocket->readDatagram(datagram.data(),datagram.size());
+        qDebug() <<"ODEBRANO:"<< datagram;
     }
     return datagram;
 }
@@ -264,12 +256,13 @@ void UDPSerwer::proceesClient()
     QByteArray inClientData;
     inClientData = readClient();
     // USTAL ARGUMENTY DO ODBIORU;  CASE?
-
+    // odlaczenie klienta
     if(inClientData == "logout")
     {
         writeToClient("disconnected");
         removeClient();
     }
+    // pobierz obraz z kamery i wyslij do klienta
     else if(inClientData == "grabFrame")
     {
         if(grabFrame() != 1)    writeToClient("grabFrame failed");
@@ -277,12 +270,16 @@ void UDPSerwer::proceesClient()
         {
             QFile img("test.pgm");
             if (!img.open(QIODevice::ReadOnly | QIODevice::Text))
-                     qDebug() << "nie otworzono img";
+                qDebug() << "nie otworzono img";
             else
-            {
-                writeToClient("frame grabbed");
-                writeToClient(QByteArray(img.readAll()));
-            }
+                sendImage();
         }
     }
+    // zmiana pozycji platformy
+    else if(inClientData[0] == 'X');
+        //przeslij pozycje x do silnika
+    else if(inClientData[0] == 'Y');
+        //przeslij pozycje y do silnika
+    else if(inClientData[0] == 'Z');
+        //przeslij pozycje z do silnika
 }
